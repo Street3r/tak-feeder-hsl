@@ -1,5 +1,13 @@
 # tak-feeder-hsl
 
+> [!WARNING]
+> **DEPRECATED** — This standalone feeder is no longer maintained.
+> Its functionality has been superseded by the TrakBridge plugin
+> [trakbridge-plugin-hsl](https://github.com/sgofferj/trakbridge-plugin-hsl)
+> ([latest release](https://github.com/sgofferj/trakbridge-plugin-hsl/releases/latest)),
+> which also fixes several bugs present in this feeder (HFP mode mapping,
+> `null` speed/heading handling, CoT types).
+
 TAK Feeder for HSL (Helsinki Regional Transport) real-time vehicle data via MQTT.
 (C) 2026 Stefan Gofferje
 
