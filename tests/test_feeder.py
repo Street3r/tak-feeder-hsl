@@ -96,6 +96,27 @@ class HslTest(unittest.TestCase):
         self.assertEqual(subscriptions("HSL:1015"),
                          ["/hfp/v2/journey/ongoing/vp/+/+/+/1015/#"])
 
+    def test_exclude_modes(self) -> None:
+        src = HslSource(Settings(exclude_modes=("train",)))
+        src.handle(TOPIC.format(mode="train"), vp(), now=0)
+        src.handle(TOPIC.format(mode="bus"), vp(), now=0)
+        self.assertEqual(len(src.collect(0)), 1)
+        base = "/hfp/v2/journey/ongoing/vp"
+        subs = subscriptions("", ("TRAIN",))
+        self.assertNotIn(f"{base}/train/#", subs)
+        self.assertIn(f"{base}/bus/#", subs)
+        self.assertIn(f"{base}/metro/#", subs)
+        self.assertEqual(subscriptions("HSL:1015", ("train", "bus", "ubus", "robot", "ferry", "metro")),
+                         [f"{base}/tram/+/+/1015/#"])
+
+    def test_exclude_modes_from_env(self) -> None:
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"HSL_EXCLUDE_MODES": "Train, ferry"}):
+            self.assertEqual(Settings.from_env().exclude_modes, ("train", "ferry"))
+        with mock.patch.dict(os.environ, {"HSL_EXCLUDE_MODES": ""}):
+            self.assertEqual(Settings.from_env().exclude_modes, ())
+
 
 if __name__ == "__main__":
     unittest.main()

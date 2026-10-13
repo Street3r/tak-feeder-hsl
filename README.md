@@ -51,6 +51,7 @@ Environment variables (see [.env.example](.env.example)):
 | `PYTAK_TLS_DONT_VERIFY` | `0` | `1` = do not verify the server certificate |
 | `PYTAK_TLS_CLIENT_CAFILE` | | CA file for verifying the server |
 | `HSL_ROUTE_FILTER` | (all) | Route ids or passenger numbers, wildcards allowed: `15,M1,M2,L*` |
+| `HSL_EXCLUDE_MODES` | (none) | Transport modes to leave out: `bus`, `tram`, `metro`, `train`, `ferry`, `ubus`, `robot`. Not subscribed at all. `train` when [tak-feeder-vr](https://github.com/Street3r/tak-feeder-vr) sends the trains |
 | `HSL_MQTT_BROKER` / `HSL_MQTT_PORT` | `mqtt.hsl.fi` / `1883` | HFP broker |
 | `HSL_STOP_NAMES` | `1` | `0` = no GTFS download, no next stop names |
 | `HSL_GTFS_URL` | `https://infopalvelut.storage.hsldev.com/gtfs/hsl.zip` | GTFS package |
@@ -107,6 +108,8 @@ Changes in this fork (Street3r):
     occupancy in %, data source, `#HSL #<mode>` tags.
   - Standard variable names (`PYTAK_TLS_CLIENT_*`) with the old ones as
     aliases; health check; unprivileged container; tests and CI.
+  - `HSL_EXCLUDE_MODES` leaves out transport modes, e.g. trains when
+    tak-feeder-vr sends them.
 
 ## License
 

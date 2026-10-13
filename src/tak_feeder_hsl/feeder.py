@@ -17,8 +17,8 @@ from typing import Any, Optional
 from urllib.parse import unquote
 
 from . import __version__
-from .common import (Health, as_float, cot_event, env, env_bool, env_float, remarks_text,
-                     start_mqtt)
+from .common import (Health, as_float, cot_event, env, env_bool, env_float, env_list,
+                     remarks_text, start_mqtt)
 from .stops import GTFS_URL, StopNames
 
 LOG = logging.getLogger("tak_feeder_hsl")
@@ -40,6 +40,8 @@ MODE_TYPES = {
     "robot": BUS_TYPE,
 }
 DEFAULT_TYPE = BUS_TYPE
+# Every HFP transport mode, used when some are excluded (HSL_EXCLUDE_MODES).
+ALL_MODES = tuple(MODE_TYPES)
 
 TRIP_LOCK_SECONDS = 30  # anti-jitter: one car per trip for this long
 
@@ -51,6 +53,7 @@ class Settings:
     broker: str = "mqtt.hsl.fi"
     port: int = 1883
     route_filter: str = ""
+    exclude_modes: tuple[str, ...] = ()
     update_interval: float = 5.0
     refresh_interval: float = 20.0
     stale_seconds: float = 60.0
@@ -67,6 +70,7 @@ class Settings:
             broker=env("HSL_MQTT_BROKER", d.broker),
             port=int(env_float("HSL_MQTT_PORT", d.port)),
             route_filter=env("HSL_ROUTE_FILTER", ""),
+            exclude_modes=tuple(m.lower() for m in env_list("HSL_EXCLUDE_MODES")),
             update_interval=env_float("UPDATE_INTERVAL", d.update_interval),
             refresh_interval=env_float("REFRESH_INTERVAL", d.refresh_interval),
             stale_seconds=env_float("STALE_SECONDS", d.stale_seconds),
@@ -107,12 +111,16 @@ def matches_filter(route_id: str, desi: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(rid, p) or fnmatch.fnmatch(desi, p) for p in patterns)
 
 
-def subscriptions(route_filter: str) -> list[str]:
-    """Targeted topics for exact routes, the whole feed for wildcards or none."""
+def subscriptions(route_filter: str, exclude_modes: tuple[str, ...] = ()) -> list[str]:
+    """Targeted topics for exact routes, the whole feed for wildcards or none.
+    With excluded modes, one subscription per remaining mode, so the broker
+    does not send the excluded vehicles at all."""
     patterns = filters(route_filter)
+    excluded = {m.lower() for m in exclude_modes}
+    modes = ["+"] if not excluded else [m for m in ALL_MODES if m not in excluded]
     if not patterns or any(ch in p for p in patterns for ch in "*?["):
-        return [f"{HFP_TOPIC_BASE}/#"]
-    return [f"{HFP_TOPIC_BASE}/+/+/+/{p}/#" for p in patterns]
+        return [f"{HFP_TOPIC_BASE}/{m}/#" if m != "+" else f"{HFP_TOPIC_BASE}/#" for m in modes]
+    return [f"{HFP_TOPIC_BASE}/{m}/+/+/{p}/#" for m in modes for p in patterns]
 
 
 @dataclass
@@ -158,6 +166,8 @@ class HslSource:
         if not parsed:
             return
         mode, route_id = parsed
+        if mode in self.s.exclude_modes:
+            return
         vp = json.loads(payload.decode("utf-8")).get("VP")
         if not isinstance(vp, dict):
             return
@@ -266,7 +276,7 @@ class HslSource:
 
     async def start(self) -> None:
         """Connect to the HSL broker and load stop names in the background."""
-        topics = subscriptions(self.s.route_filter)
+        topics = subscriptions(self.s.route_filter, self.s.exclude_modes)
         LOG.info("HSL: %s:%s, topics %s", self.s.broker, self.s.port, ", ".join(topics))
         self.client = start_mqtt(
             "HSL", f"mqtt://{self.s.broker}:{self.s.port}", topics, self.handle,
