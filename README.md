@@ -22,10 +22,21 @@ The fork keeps a standalone container and brings in the plugin's fixes.
 | Callsign | `HSL <route>`, e.g. `HSL 15`, `HSL M1`, `HSL I` |
 | Type | trams, metros, trains `a-f-G-E-V-C-M`; buses `a-f-G-E-V-C-M-H`; ferries `a-f-S-X-C` |
 | Speed / course | m/s and degrees from HFP (`null` is sent as 0) |
-| Remarks | route, mode, vehicles of the trip, trip start, occupancy, source, `#HSL #<mode>` |
+| Remarks | route, destination, next stop, delay, mode, vehicles, trip start, occupancy, source, `#HSL #<mode>` |
 
 - **Anti-jitter:** the cars of one train report slightly different positions,
   so a trip follows one car while it keeps reporting.
+- **Next stop:** HFP gives only the stop id; names come from HSL's GTFS
+  package, refreshed daily. Only `stops.txt` is read, with HTTP range requests
+  when the server allows them. HFP has no arrival estimate, so the remarks
+  show the delay instead of a time:
+
+  ```
+  Route: I
+  To: Lentoasema
+  Next: Pasila
+  Delay: +2 min
+  ```
 - **Send rate:** positions are buffered. Every `UPDATE_INTERVAL` seconds the
   vehicles that moved are sent; the rest every `REFRESH_INTERVAL` seconds.
 
@@ -41,6 +52,8 @@ Environment variables (see [.env.example](.env.example)):
 | `PYTAK_TLS_CLIENT_CAFILE` | | CA file for verifying the server |
 | `HSL_ROUTE_FILTER` | (all) | Route ids or passenger numbers, wildcards allowed: `15,M1,M2,L*` |
 | `HSL_MQTT_BROKER` / `HSL_MQTT_PORT` | `mqtt.hsl.fi` / `1883` | HFP broker |
+| `HSL_STOP_NAMES` | `1` | `0` = no GTFS download, no next stop names |
+| `HSL_GTFS_URL` | `https://infopalvelut.storage.hsldev.com/gtfs/hsl.zip` | GTFS package |
 | `UPDATE_INTERVAL` | `5` | Seconds between send rounds |
 | `REFRESH_INTERVAL` | `20` | Re-send unmoved vehicles this often |
 | `STALE_SECONDS` | `60` | Marker lifetime without new data |
@@ -90,7 +103,8 @@ Changes in this fork (Street3r):
     MQTT message; vehicles silent for `MAX_AGE` are dropped.
   - The feeder no longer exits when the MQTT broker is unreachable at start;
     pytak reconnects to TAK after outages without losing the buffer.
-  - Remarks: mode line, occupancy in %, data source, `#HSL #<mode>` tags.
+  - Remarks: destination, next stop (GTFS stop names), delay, mode,
+    occupancy in %, data source, `#HSL #<mode>` tags.
   - Standard variable names (`PYTAK_TLS_CLIENT_*`) with the old ones as
     aliases; health check; unprivileged container; tests and CI.
 

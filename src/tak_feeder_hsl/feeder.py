@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import json
 import logging
@@ -13,9 +14,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from . import __version__
-from .common import Health, as_float, cot_event, env, env_float, remarks_text, start_mqtt
+from .common import (Health, as_float, cot_event, env, env_bool, env_float, remarks_text,
+                     start_mqtt)
+from .stops import GTFS_URL, StopNames
 
 LOG = logging.getLogger("tak_feeder_hsl")
 
@@ -52,6 +56,8 @@ class Settings:
     stale_seconds: float = 60.0
     max_age: float = 120.0
     source_line: str = "Source: HSL open data, CC BY 4.0"
+    stop_names: bool = True
+    gtfs_url: str = GTFS_URL
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -66,6 +72,8 @@ class Settings:
             stale_seconds=env_float("STALE_SECONDS", d.stale_seconds),
             max_age=env_float("MAX_AGE", d.max_age),
             source_line=env("SOURCE_LINE", d.source_line),
+            stop_names=env_bool("HSL_STOP_NAMES", d.stop_names),
+            gtfs_url=env("HSL_GTFS_URL", d.gtfs_url),
         )
 
 
@@ -75,6 +83,15 @@ def parse_topic(topic: str) -> Optional[tuple[str, str]]:
     if len(parts) < 10:
         return None
     return parts[6], parts[9]
+
+
+def topic_journey(topic: str) -> tuple[str, str]:
+    """(headsign, next stop id) from .../<route>/<dir>/<headsign>/<start>/<next_stop>/...
+    The next stop is "EOL" at the end of the line."""
+    parts = topic.split("/")
+    headsign = unquote(parts[11]) if len(parts) > 11 else ""
+    next_stop = parts[13] if len(parts) > 13 else ""
+    return headsign, "" if next_stop == "EOL" else next_stop
 
 
 def filters(route_filter: str) -> list[str]:
@@ -112,6 +129,9 @@ class Trip:
     start: str
     occupancy: Optional[float]
     car: str
+    headsign: str = ""
+    next_stop: str = ""
+    delay: Optional[float] = None  # seconds behind schedule
     cars: set[str] = field(default_factory=set)
     seen: float = 0.0  # monotonic time of the last accepted position
     sent: float = 0.0  # monotonic time of the last send
@@ -129,6 +149,7 @@ class HslSource:
         self.lock = threading.Lock()
         self.messages = 0
         self.client: Any = None
+        self.stops = StopNames()
 
     # ------------------------------------------------------------- input
     def handle(self, topic: str, payload: bytes, now: Optional[float] = None) -> None:
@@ -172,6 +193,9 @@ class HslSource:
             trip.course = as_float(vp.get("hdg"), 0.0) or 0.0
             trip.start = str(vp.get("start") or "")
             trip.occupancy = as_float(vp.get("occu"))
+            trip.headsign, trip.next_stop = topic_journey(topic)
+            dl = as_float(vp.get("dl"))  # HFP: negative = behind schedule
+            trip.delay = None if dl is None else -dl
             trip.car = car
             trip.seen = now
             trip.changed = trip.changed or moved
@@ -179,8 +203,16 @@ class HslSource:
     # ------------------------------------------------------------ output
     def build(self, trip: Trip) -> bytes:
         """CoT for one trip."""
+        stop = self.stops.get(trip.next_stop) if trip.next_stop else None
+        delay = None
+        if trip.delay is not None:
+            minutes = round(trip.delay / 60)
+            delay = f"Delay: {minutes:+d} min" if minutes else "On time"
         lines = [
             f"Route: {trip.route}",
+            f"To: {trip.headsign}" if trip.headsign else None,
+            f"Next: {stop}" if stop else None,
+            delay,
             f"Mode: {trip.mode}",
             f"Vehicles: {', '.join(sorted(trip.cars))}",
             f"Trip start: {trip.start}" if trip.start else None,
@@ -222,11 +254,23 @@ class HslSource:
         """Source protocol: events for this round."""
         return self.collect()
 
+    async def _stop_name_loop(self) -> None:
+        headers = {"User-Agent": f"tak-feeder-hsl/{__version__}"}
+        while True:
+            try:
+                await asyncio.to_thread(self.stops.refresh, self.s.gtfs_url, headers)
+                await asyncio.sleep(24 * 3600)
+            except Exception as exc:  # noqa: BLE001  pylint: disable=broad-exception-caught
+                LOG.warning("GTFS stop names failed: %s, retrying in 1 h", exc)
+                await asyncio.sleep(3600)
+
     async def start(self) -> None:
-        """Connect to the HSL broker in the background."""
+        """Connect to the HSL broker and load stop names in the background."""
         topics = subscriptions(self.s.route_filter)
         LOG.info("HSL: %s:%s, topics %s", self.s.broker, self.s.port, ", ".join(topics))
         self.client = start_mqtt(
             "HSL", f"mqtt://{self.s.broker}:{self.s.port}", topics, self.handle,
             client_id=f"tak-feeder-hsl-{__version__}-{uuid.uuid4().hex[:8]}",
         )
+        if self.s.stop_names:
+            await self._stop_name_loop()

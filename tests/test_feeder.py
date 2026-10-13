@@ -77,6 +77,16 @@ class HslTest(unittest.TestCase):
         self.assertIn("Source: HSL open data, CC BY 4.0", text)
         self.assertTrue(text.endswith("#HSL #bus"))
 
+    def test_journey_lines(self) -> None:
+        self.src.stops.names = {"1020": "Pasila"}
+        self.src.handle(TOPIC.format(mode="train"), vp(dl=-130), now=0)
+        text = self.events(0)[0].find("detail/remarks").text
+        self.assertIn("To: Lentoasema", text)
+        self.assertIn("Next: Pasila", text)
+        self.assertIn("Delay: +2 min", text)
+        self.src.handle(TOPIC.format(mode="train"), vp(dl=10, lat=60.3), now=1)
+        self.assertIn("On time", self.events(1)[0].find("detail/remarks").text)
+
     def test_filter(self) -> None:
         src = HslSource(Settings(route_filter="M*,15"))
         src.handle(TOPIC.format(mode="bus"), vp(desi="15"), now=0)
