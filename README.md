@@ -110,6 +110,10 @@ Changes in this fork (Street3r):
     aliases; health check; unprivileged container; tests and CI.
   - `HSL_EXCLUDE_MODES` leaves out transport modes, e.g. trains when
     tak-feeder-vr sends them.
+- 2026-10-15
+  - Every event of a send round reaches TAK. pytak's send queue holds 100
+    events and dropped the oldest when full, so rounds of more than 100
+    lost the rest.
 
 ## License
 
