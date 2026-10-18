@@ -117,4 +117,4 @@ Changes in this fork (Street3r):
 
 ## License
 
-GNU General Public License v3.0 or later, see [LICENSE.md](LICENSE.md).
+GNU General Public License v3.0 or later, see [LICENSE](LICENSE).
