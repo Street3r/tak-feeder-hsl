@@ -37,8 +37,9 @@ The fork keeps a standalone container and brings in the plugin's fixes.
   Next: Pasila
   Delay: +2 min
   ```
-- **Send rate:** positions are buffered. Every `UPDATE_INTERVAL` seconds the
-  vehicles that moved are sent; the rest every `REFRESH_INTERVAL` seconds.
+- **Send rate:** positions are buffered. A moving vehicle is sent every
+  `SEND_MOVING_INTERVAL` seconds, a stopped one every `SEND_STATIONARY_INTERVAL`
+  seconds.
 
 ## Configuration
 
@@ -55,9 +56,10 @@ Environment variables (see [.env.example](.env.example)):
 | `HSL_MQTT_BROKER` / `HSL_MQTT_PORT` | `mqtt.hsl.fi` / `1883` | HFP broker |
 | `HSL_STOP_NAMES` | `1` | `0` = no GTFS download, no next stop names |
 | `HSL_GTFS_URL` | `https://infopalvelut.storage.hsldev.com/gtfs/hsl.zip` | GTFS package |
-| `UPDATE_INTERVAL` | `5` | Seconds between send rounds |
-| `REFRESH_INTERVAL` | `20` | Re-send unmoved vehicles this often |
-| `STALE_SECONDS` | `60` | Marker lifetime without new data |
+| `SEND_MOVING_INTERVAL` | `5` | Seconds between sends of a moving vehicle, min 1 (old name `UPDATE_INTERVAL`) |
+| `SEND_STATIONARY_INTERVAL` | `60` | Seconds between sends of a stopped vehicle, min 30 (old name `REFRESH_INTERVAL`) |
+| `STATIONARY_SPEED` | `0.5` | Below this speed (m/s) a vehicle counts as stopped |
+| `STALE_SECONDS` | `180` | Marker lifetime; always at least 3 send intervals |
 | `MAX_AGE` | `120` | Stop sending a vehicle silent this long |
 | `SOURCE_LINE` | `Source: HSL open data, CC BY 4.0` | Attribution line in the remarks |
 | `HEALTH_MAX_SILENCE` | `600` | Unhealthy when no HSL data for this long (0 = off) |
@@ -114,6 +116,12 @@ Changes in this fork (Street3r):
   - Every event of a send round reaches TAK. pytak's send queue holds 100
     events and dropped the oldest when full, so rounds of more than 100
     lost the rest.
+- 2026-10-19
+  - Send intervals shared by all feeders: a moving vehicle is sent every
+    `SEND_MOVING_INTERVAL` (5 s), a stopped one every
+    `SEND_STATIONARY_INTERVAL` (60 s) and at once when it stops. The
+    latest position is re-sent at that rate even when the source has
+    nothing new. The old variable names still work.
 
 ## License
 

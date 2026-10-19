@@ -17,8 +17,8 @@ from typing import Any, Optional
 from urllib.parse import unquote
 
 from . import __version__
-from .common import (Health, as_float, cot_event, env, env_bool, env_float, env_list,
-                     remarks_text, start_mqtt)
+from .common import (Health, SendPolicy, SendSchedule, as_float, cot_event, env, env_bool,
+                     env_float, env_list, remarks_text, start_mqtt)
 from .stops import GTFS_URL, StopNames
 
 LOG = logging.getLogger("tak_feeder_hsl")
@@ -54,9 +54,7 @@ class Settings:
     port: int = 1883
     route_filter: str = ""
     exclude_modes: tuple[str, ...] = ()
-    update_interval: float = 5.0
-    refresh_interval: float = 20.0
-    stale_seconds: float = 60.0
+    send: SendPolicy = field(default_factory=SendPolicy)
     max_age: float = 120.0
     source_line: str = "Source: HSL open data, CC BY 4.0"
     stop_names: bool = True
@@ -71,9 +69,7 @@ class Settings:
             port=int(env_float("HSL_MQTT_PORT", d.port)),
             route_filter=env("HSL_ROUTE_FILTER", ""),
             exclude_modes=tuple(m.lower() for m in env_list("HSL_EXCLUDE_MODES")),
-            update_interval=env_float("UPDATE_INTERVAL", d.update_interval),
-            refresh_interval=env_float("REFRESH_INTERVAL", d.refresh_interval),
-            stale_seconds=env_float("STALE_SECONDS", d.stale_seconds),
+            send=SendPolicy.from_env(),
             max_age=env_float("MAX_AGE", d.max_age),
             source_line=env("SOURCE_LINE", d.source_line),
             stop_names=env_bool("HSL_STOP_NAMES", d.stop_names),
@@ -142,8 +138,6 @@ class Trip:
     delay: Optional[float] = None  # seconds behind schedule
     cars: set[str] = field(default_factory=set)
     seen: float = 0.0  # monotonic time of the last accepted position
-    sent: float = 0.0  # monotonic time of the last send
-    changed: bool = True
 
 
 class HslSource:
@@ -158,6 +152,7 @@ class HslSource:
         self.messages = 0
         self.client: Any = None
         self.stops = StopNames()
+        self.schedule = SendSchedule(settings.send)
 
     # ------------------------------------------------------------- input
     def handle(self, topic: str, payload: bytes, now: Optional[float] = None) -> None:
@@ -196,7 +191,6 @@ class HslSource:
                     speed=0.0, course=0.0, start="", occupancy=None, car=car, cars={car},
                 )
                 self.trips[trip_key] = trip
-            moved = (trip.lat, trip.lon) != (lat, lon) or trip.car != car
             trip.route = desi or route_id.replace("HSL:", "")
             trip.lat, trip.lon = lat, lon
             trip.speed = as_float(vp.get("spd"), 0.0) or 0.0  # m/s, null -> 0
@@ -208,7 +202,6 @@ class HslSource:
             trip.delay = None if dl is None else -dl
             trip.car = car
             trip.seen = now
-            trip.changed = trip.changed or moved
 
     # ------------------------------------------------------------ output
     def build(self, trip: Trip) -> bytes:
@@ -235,24 +228,25 @@ class HslSource:
             lon=trip.lon,
             callsign=f"HSL {trip.route}",
             remarks=remarks_text(lines, self.s.source_line, ("HSL", trip.mode)),
-            stale=self.s.stale_seconds,
+            stale=self.s.send.stale_for(self.s.send.interval(trip.speed)),
             course=trip.course,
             speed=trip.speed,
         )
 
     def collect(self, now: Optional[float] = None) -> list[bytes]:
-        """Changed trips, plus unchanged ones every refresh interval.
-        Trips silent for max_age seconds are dropped and stale out in ATAK."""
+        """Trips due by the send policy: moving ones every SEND_MOVING_INTERVAL,
+        stopped ones every SEND_STATIONARY_INTERVAL, the latest position again
+        if nothing newer has arrived. Trips silent for max_age seconds are
+        dropped and stale out in ATAK."""
         now = time.monotonic() if now is None else now
         events = []
         with self.lock:
             for key in [k for k, t in self.trips.items() if now - t.seen > self.s.max_age]:
-                del self.trips[key]
+                self.schedule.forget(self.trips.pop(key).uid)
             for trip in self.trips.values():
-                if trip.changed or now - trip.sent >= self.s.refresh_interval:
+                if self.schedule.due(trip.uid, trip.speed, now):
                     events.append(self.build(trip))
-                    trip.sent = now
-                    trip.changed = False
+                    self.schedule.mark(trip.uid, trip.speed, now)
             messages, self.messages = self.messages, 0
         if self.health is not None:
             if messages:

@@ -3,6 +3,7 @@
 
 import json
 import unittest
+from datetime import datetime
 import xml.etree.ElementTree as ET
 
 from tak_feeder_hsl.feeder import HslSource, Settings, subscriptions
@@ -21,7 +22,7 @@ TOPIC = "/hfp/v2/journey/ongoing/vp/{mode}/0090/01001/3001I/1/Lentoasema/12:04/1
 
 class HslTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.src = HslSource(Settings(refresh_interval=20, max_age=120))
+        self.src = HslSource(Settings(max_age=120))
 
     def events(self, now):
         return [ET.fromstring(e) for e in self.src.collect(now)]
@@ -50,12 +51,22 @@ class HslTest(unittest.TestCase):
 
     def test_send_rate(self) -> None:
         for i in range(10):  # ten messages in one round -> one event
-            self.src.handle(TOPIC.format(mode="bus"), vp(lat=60.2 + i / 1000), now=i / 10)
+            self.src.handle(TOPIC.format(mode="bus"), vp(lat=60.2 + i / 1000, spd=10), now=i / 10)
         self.assertEqual(len(self.events(1)), 1)
-        self.assertEqual(len(self.events(2)), 0)  # unchanged, not yet refreshed
-        self.assertEqual(len(self.events(22)), 1)  # refreshed
-        self.src.handle(TOPIC.format(mode="bus"), vp(lat=60.3), now=23)
-        self.assertEqual(len(self.events(24)), 1)  # moved
+        self.assertEqual(len(self.events(2)), 0)  # moving: every 5 s
+        self.assertEqual(len(self.events(6)), 1)  # latest position again
+        self.src.handle(TOPIC.format(mode="bus"), vp(lat=60.3, spd=0), now=7)
+        self.assertEqual(len(self.events(7)), 1)  # stopped: sent at once
+        self.src.handle(TOPIC.format(mode="bus"), vp(lat=60.3, spd=0), now=40)
+        self.assertEqual(len(self.events(40)), 0)  # stopped: every 60 s
+        self.assertEqual(len(self.events(67)), 1)
+
+    def test_stale_follows_interval(self) -> None:
+        self.src.handle(TOPIC.format(mode="bus"), vp(spd=0), now=0)
+        event = self.events(0)[0]
+        start = datetime.fromisoformat(event.get("start").replace("Z", "+00:00"))
+        stale = datetime.fromisoformat(event.get("stale").replace("Z", "+00:00"))
+        self.assertEqual((stale - start).total_seconds(), 180)  # 3 x 60 s
 
     def test_old_trips_dropped(self) -> None:
         self.src.handle(TOPIC.format(mode="bus"), vp(), now=0)
@@ -84,8 +95,8 @@ class HslTest(unittest.TestCase):
         self.assertIn("To: Lentoasema", text)
         self.assertIn("Next: Pasila", text)
         self.assertIn("Delay: +2 min", text)
-        self.src.handle(TOPIC.format(mode="train"), vp(dl=10, lat=60.3), now=1)
-        self.assertIn("On time", self.events(1)[0].find("detail/remarks").text)
+        self.src.handle(TOPIC.format(mode="train"), vp(dl=10, lat=60.3), now=5)
+        self.assertIn("On time", self.events(5)[0].find("detail/remarks").text)
 
     def test_filter(self) -> None:
         src = HslSource(Settings(route_filter="M*,15"))

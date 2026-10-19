@@ -22,7 +22,7 @@ async def main() -> None:
     settings = Settings.from_env()
     LOG.info("tak-feeder-hsl %s -> %s", __version__, tak.cot_url)
     health = Health(max_silence=env_float("HEALTH_MAX_SILENCE", 600.0))
-    await run_feeder(tak, HslSource(settings, health), settings.update_interval)
+    await run_feeder(tak, HslSource(settings, health), settings.send.moving)
 
 
 def run() -> None:
