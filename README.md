@@ -1,9 +1,8 @@
 # tak-feeder-hsl
 
-> [!WARNING]
-> **Work in progress. Not recommended for use.** This fork is being improved
-> and has not been tested against a live TAK server yet. Things may change or
-> break without notice.
+> [!NOTE]
+> Tested with live data and TAK Server 5.8 (October 2026).
+> Settings and CoT details may still change.
 
 TAK feeder for HSL (Helsinki Regional Transport) real-time vehicle positions.
 It subscribes to HSL's High-Frequency Positioning (HFP) MQTT feed and sends
