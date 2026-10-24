@@ -11,7 +11,7 @@ license = "GPL-3.0-or-later"
 authors = [{ name = "Stefan Gofferje" }, { name = "Street3r" }]
 requires-python = ">=3.12"
 dependencies = [
-    "pytak[with-aiohttp]>=7.5.2,<8",
+    "pytak[with-aiohttp,with-crypto]>=7.5.2,<8",
     "paho-mqtt>=2.1,<3",
 ]
 
